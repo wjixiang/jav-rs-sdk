@@ -1,0 +1,26 @@
+[package]
+name = "jav-rs-sdk"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Async Rust SDK for the TypeSafe Jev System One API"
+repository = "https://github.com/typesafe-ai/jav-rs-sdk"
+keywords = ["typesafe", "jev", "ai", "sdk"]
+categories = ["api-bindings"]
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "2"
+httpdate = "1"
+async-trait = "0.1"
+tokio = { version = "1", features = ["time"] }
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+wiremock = "0.6"
