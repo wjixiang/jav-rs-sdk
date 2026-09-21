@@ -1,19 +1,32 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
+/// Exponential-backoff configuration for HTTP status and transport failures.
+///
+/// The default policy retries 408, 429, all 5xx statuses (including 529), and
+/// transient connection or timeout failures. It performs at most two retries.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RetryPolicy {
+    /// Number of attempts after the initial request.
     pub max_retries: u32,
+    /// Delay before the first retry.
     pub initial_delay: Duration,
+    /// Upper bound on computed exponential delay before jitter.
     pub max_delay: Duration,
+    /// Fraction by which a computed delay may be reduced, from 0 to 1.
     pub jitter: f64,
+    /// HTTP status codes eligible for another attempt.
     pub retry_statuses: BTreeSet<u16>,
+    /// Whether `Retry-After` and `retry-after-ms` override computed delay.
     pub respect_retry_after: bool,
+    /// Whether non-timeout connection/request errors are retried.
     pub retry_connection_errors: bool,
+    /// Whether HTTP operation timeouts are retried.
     pub retry_timeout_errors: bool,
 }
 
 impl Default for RetryPolicy {
+    /// Returns TypeSafe's documented default retry behavior.
     fn default() -> Self {
         Self {
             max_retries: 2,
@@ -29,6 +42,7 @@ impl Default for RetryPolicy {
 }
 
 impl RetryPolicy {
+    /// Returns the default policy with retries disabled.
     pub fn disabled() -> Self {
         Self {
             max_retries: 0,
@@ -36,11 +50,13 @@ impl RetryPolicy {
         }
     }
 
+    /// Adds a status code to the retry set.
     pub fn retry_status(mut self, status: u16) -> Self {
         self.retry_statuses.insert(status);
         self
     }
 
+    /// Returns whether an HTTP status is configured for retry.
     pub fn should_retry_status(&self, status: u16) -> bool {
         self.retry_statuses.contains(&status)
     }

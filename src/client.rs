@@ -16,12 +16,18 @@ use crate::{API_KEY_ENV, BASE_URL_ENV, DEFAULT_MODEL_ENV};
 const SYSTEM_ONE_PATH: &str = "/v1/systemone";
 const MODELS_PATH: &str = "/v1/models";
 
+/// A complete System One request body.
+///
+/// The same keys used in `questions` are preserved in the response's answers.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct SystemOneRequest {
+    /// Text or structured content to evaluate.
     pub state: JsonContent,
+    /// Named questions; keys are returned unchanged in the answer map.
     pub questions: QuestionMap,
 }
 
+/// Fluent builder for validating and assembling a [`SystemOneRequest`].
 #[derive(Debug, Clone, Default)]
 pub struct SystemOneRequestBuilder {
     state: Option<JsonContent>,
@@ -29,20 +35,37 @@ pub struct SystemOneRequestBuilder {
 }
 
 impl SystemOneRequestBuilder {
+    /// Creates an empty builder.
+    ///
+    /// A request is not valid until [`state`](Self::state) and at least one
+    /// [`question`](Self::question) have been added.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Sets the state to evaluate.
+    ///
+    /// The value must be a string, JSON object, or JSON array.
     pub fn state(mut self, state: impl Into<JsonContent>) -> Self {
         self.state = Some(state.into());
         self
     }
 
+    /// Adds or replaces a question under a caller-chosen identifier.
+    ///
+    /// Identifiers do not affect inference; they are labels used to correlate
+    /// requests with answers.
     pub fn question(mut self, id: impl Into<String>, question: Question) -> Self {
         self.questions.insert(id.into(), question);
         self
     }
 
+    /// Validates limits and JSON shapes, then builds the request.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidRequest`] when state is missing or malformed,
+    /// no questions are present, or a question violates TypeSafe's constraints.
     pub fn build(self) -> Result<SystemOneRequest, Error> {
         let state = self.state.ok_or_else(|| {
             Error::InvalidRequest("state is required before building a request".into())
@@ -54,6 +77,10 @@ impl SystemOneRequestBuilder {
 }
 
 impl SystemOneRequest {
+    /// Creates a request without validating it.
+    ///
+    /// Prefer [`SystemOneRequestBuilder::build`] for a checked constructor.
+    /// [`TypeSafeClient::evaluate_with`] validates again before sending.
     pub fn new(state: impl Into<JsonContent>, questions: QuestionMap) -> Self {
         Self {
             state: state.into(),
@@ -78,48 +105,68 @@ impl SystemOneRequest {
     }
 }
 
+/// Per-call overrides applied on top of the client configuration.
 #[derive(Debug, Clone, Default)]
 pub struct EvaluateOptions {
+    /// Overrides the client's default model for this request.
     pub model: Option<String>,
+    /// Replaces the client retry policy for this request.
     pub retry: Option<RetryPolicy>,
+    /// Overrides the timeout for a single HTTP operation.
     pub timeout: Option<Duration>,
+    /// Additional headers. `Authorization` remains SDK-managed.
     pub extra_headers: HashMap<String, String>,
+    /// Extra top-level JSON fields, shallow-merged after SDK-owned fields.
     pub extra_body: Map<String, Value>,
 }
 
 impl EvaluateOptions {
+    /// Creates default options.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Sets the model that will handle this evaluation.
     pub fn model(mut self, model: impl Into<String>) -> Self {
         self.model = Some(model.into());
         self
     }
 
+    /// Replaces the effective retry policy.
     pub fn retry(mut self, retry: RetryPolicy) -> Self {
         self.retry = Some(retry);
         self
     }
 
+    /// Overrides the timeout for this operation.
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
     }
 
+    /// Adds a custom header; later calls replace values with the same name.
     pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.extra_headers.insert(name.into(), value.into());
         self
     }
 
+    /// Adds a top-level request field, replacing SDK fields on collision.
     pub fn extra_body(mut self, name: impl Into<String>, value: impl Into<Value>) -> Self {
         self.extra_body.insert(name.into(), value.into());
         self
     }
 }
 
+/// Options accepted by [`TypeSafeClient::list_models_with`].
+///
+/// Retry, timeout, and headers apply. `extra_body` has no effect on `GET`
+/// model catalogue requests.
 pub type ListModelsOptions = EvaluateOptions;
 
+/// Configured asynchronous client for TypeSafe's public API.
+///
+/// Cloning shares the underlying connection pool and configuration. Debug
+/// output intentionally omits the API key.
 #[derive(Clone)]
 pub struct TypeSafeClient {
     api_key: String,
@@ -141,6 +188,7 @@ impl std::fmt::Debug for TypeSafeClient {
     }
 }
 
+/// Builder for [`TypeSafeClient`].
 #[derive(Debug, Clone)]
 pub struct TypeSafeClientBuilder {
     api_key: Option<String>,
@@ -151,6 +199,8 @@ pub struct TypeSafeClientBuilder {
 }
 
 impl Default for TypeSafeClientBuilder {
+    /// Defaults to the production API root, `jev-latest`, standard retry
+    /// behavior, and a 10-second HTTP timeout.
     fn default() -> Self {
         Self {
             api_key: None,
@@ -163,36 +213,52 @@ impl Default for TypeSafeClientBuilder {
 }
 
 impl TypeSafeClientBuilder {
+    /// Sets the API key used for bearer authentication.
     pub fn api_key(mut self, api_key: impl Into<String>) -> Self {
         self.api_key = Some(api_key.into());
         self
     }
 
+    /// Sets the API root without a trailing slash.
     pub fn base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = Some(base_url.into());
         self
     }
 
+    /// Sets the default model used when an evaluation supplies no override.
     pub fn model(mut self, model: impl Into<String>) -> Self {
         self.model = Some(model.into());
         self
     }
 
+    /// Sets the client-level retry policy.
     pub fn retry(mut self, retry: RetryPolicy) -> Self {
         self.retry = retry;
         self
     }
 
+    /// Sets the default HTTP operation timeout.
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
     }
 
+    /// Removes the client-level HTTP timeout.
     pub fn no_timeout(mut self) -> Self {
         self.timeout = None;
         self
     }
 
+    /// Builds a client with explicit settings taking precedence over
+    /// environment variables.
+    ///
+    /// Reads [`API_KEY_ENV`], [`BASE_URL_ENV`], and [`DEFAULT_MODEL_ENV`]
+    /// only when the corresponding explicit value is absent.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Configuration`] when required settings are absent or
+    /// invalid.
     pub fn from_env(self) -> Result<TypeSafeClient, Error> {
         let api_key = self
             .api_key
@@ -209,6 +275,12 @@ impl TypeSafeClientBuilder {
         TypeSafeClient::build_inner(api_key, base_url, model, self.retry, self.timeout)
     }
 
+    /// Builds a client from explicit builder values.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Configuration`] for a missing API key, empty model, or
+    /// invalid base URL.
     pub fn build(self) -> Result<TypeSafeClient, Error> {
         let api_key = self
             .api_key
@@ -224,14 +296,23 @@ impl TypeSafeClientBuilder {
 }
 
 impl TypeSafeClient {
+    /// Returns a builder using SDK defaults.
     pub fn builder() -> TypeSafeClientBuilder {
         TypeSafeClientBuilder::default()
     }
 
+    /// Creates a client with the production base URL, `jev-latest`, standard
+    /// retries, and a 10-second timeout.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Configuration`] when the key is blank or the HTTP
+    /// client cannot be initialized.
     pub fn new(api_key: impl Into<String>) -> Result<Self, Error> {
         Self::builder().api_key(api_key).build()
     }
 
+    /// Equivalent to [`TypeSafeClientBuilder::from_env`] with default settings.
     pub fn from_env() -> Result<Self, Error> {
         Self::builder().from_env()
     }
@@ -272,6 +353,7 @@ impl TypeSafeClient {
         })
     }
 
+    /// Alias for [`TypeSafeClient::evaluate`], named after the API resource.
     pub async fn system_one(
         &self,
         state: impl Into<JsonContent>,
@@ -280,6 +362,13 @@ impl TypeSafeClient {
         self.evaluate(state, questions).await
     }
 
+    /// Evaluates a state against all questions in a single API call.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidRequest`] before sending when validation fails;
+    /// transport, HTTP, and response decoding failures use the corresponding
+    /// [`Error`] variants.
     pub async fn evaluate(
         &self,
         state: impl Into<JsonContent>,
@@ -292,6 +381,15 @@ impl TypeSafeClient {
         .await
     }
 
+    /// Evaluates a prebuilt request with request-specific options.
+    ///
+    /// The request is validated before the HTTP call. `extra_body` values are
+    /// shallow-merged last and can override `state`, `questions`, or `model`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Api`] when TypeSafe returns a non-success status after
+    /// retries.
     pub async fn evaluate_with(
         &self,
         request: SystemOneRequest,
@@ -325,10 +423,20 @@ impl TypeSafeClient {
         decode_response(response).await
     }
 
+    /// Lists models and aliases available to the authenticated account.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Api`] for a non-success HTTP status after retries.
     pub async fn list_models(&self) -> Result<ListModelsResponse, Error> {
         self.list_models_with(EvaluateOptions::new()).await
     }
 
+    /// Lists models with request-specific retry, timeout, and header options.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Api`] for a non-success HTTP status after retries.
     pub async fn list_models_with(
         &self,
         options: ListModelsOptions,
